@@ -16,171 +16,191 @@ from loguru import logger
 from httpx_sse import aconnect_sse
 
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
+import asyncio
+from starlette.websockets import WebSocketDisconnect
+from starlette.responses import StreamingResponse
 
 
 async def streaming_chat_completions(request: CreateChatCompletionRequest):
-    # raise NotImplementedError("Streaming Chat Completion is not supported")
-
     try:
         return EventSourceResponse(
             content=chat_completions(request),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"},
         )
-
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Exception in streaming_chat_completions: {e}")
+        # You may return a 500 response or handle it differently if needed.
+        # For example:
+        # return JSONResponse({"error": str(e)}, status_code=500)
 
 
 async def chat_completions(request: CreateChatCompletionRequest):
-    """performs a chat completion using the inference server"""
-
+    """performs a chat completion using the inference server with SSE and tool calls"""
     request.stream = True
 
     request = await chat_completion_add_tools(request)
 
     fully_done = False
-    while not fully_done:
-        json_data = request.model_dump_json(
-            exclude_defaults=True, exclude_none=True, exclude_unset=True
-        )
+    try:
+        while not fully_done:
+            json_data = request.model_dump_json(
+                exclude_defaults=True, exclude_none=True, exclude_unset=True
+            )
 
-        logger.debug(json_data)
+            logger.debug(f"Request JSON: {json_data}")
 
-        last: Optional[CreateChatCompletionStreamResponse] = None  # last message
+            last: Optional[CreateChatCompletionStreamResponse] = None
+            tool_call_name: str = ""
+            tool_call_json: str = ""
+            should_forward: bool = True
+            response_content: str = ""
+            tool_call_id: str = ""
 
-        tool_call_name: str = ""
-        tool_call_json: str = ""
-        should_forward: bool = True
-        response_content: str = ""
-        tool_call_id: str = ""
+            # Connect to the SSE endpoint
+            async with aconnect_sse(
+                client, "post", "/chat/completions", content=json_data
+            ) as event_source:
+                async for sse in event_source.aiter_sse():
+                    event = sse.event
+                    data = sse.data
+                    id = sse.id
+                    retry = sse.retry
 
-        async with aconnect_sse(
-            client, "post", "/chat/completions", content=json_data
-        ) as event_source:
-            async for sse in event_source.aiter_sse():
-                event = sse.event
-                data = sse.data
-                id = sse.id
-                retry = sse.retry
-
-                logger.debug(
-                    f"event: {event},\ndata: {data},\nid: {id},\nretry: {retry}"
-                )
-
-                # handle if the SSE stream is done
-                if data == "[DONE]":
-                    break
-
-                parsed_data = CreateChatCompletionStreamResponse.model_validate_json(
-                    data
-                )
-
-                # add the delta to the response content
-                content = parsed_data.choices[0].delta.content
-                content = content if content is not None else ""
-                response_content += content
-
-                # handle stop reasons
-                if parsed_data.choices[0].finish_reason is not None:
-                    if parsed_data.choices[0].finish_reason.value in [
-                        "stop",
-                        "length",
-                    ]:
-                        fully_done = True
-                    else:
-                        should_forward = False
-
-                # this manages the incoming tool call schema
-                # most of this is assertions to please mypy
-                if parsed_data.choices[0].delta.tool_calls is not None:
-                    should_forward = False
-                    assert (
-                        parsed_data.choices[0].delta.tool_calls[0].function is not None
+                    logger.debug(
+                        f"SSE received - event: {event}, data: {data}, id: {id}, retry: {retry}"
                     )
 
-                    name = parsed_data.choices[0].delta.tool_calls[0].function.name
-                    name = name if name is not None else ""
-                    tool_call_name = name if tool_call_name == "" else tool_call_name
+                    if data == "[DONE]":
+                        # Inference server signaled end of stream
+                        logger.debug("[DONE] received from server")
+                        break
 
-                    call_id = parsed_data.choices[0].delta.tool_calls[0].id
-                    call_id = call_id if call_id is not None else ""
-                    tool_call_id = id if tool_call_id == "" else tool_call_id
+                    parsed_data = CreateChatCompletionStreamResponse.model_validate_json(
+                        data
+                    )
 
-                    arg = parsed_data.choices[0].delta.tool_calls[0].function.arguments
-                    tool_call_json += arg if arg is not None else ""
+                    # Extract content delta
+                    content = parsed_data.choices[0].delta.content
+                    content = content if content is not None else ""
+                    response_content += content
 
-                # forward SSE messages to the client
-                logger.debug(f"{should_forward=}")
-                if should_forward:
-                    # we do not want to forward tool call json to the client
-                    logger.debug("forwarding message")
-                    yield SSEData.model_validate_json(sse.data).model_dump_json()
+                    finish_reason = parsed_data.choices[0].finish_reason
+                    if finish_reason is not None:
+                        logger.debug(f"Finish reason: {finish_reason.value}")
+                        if finish_reason.value in ["stop", "length"]:
+                            fully_done = True
+                            # We'll break out of the event_source loop now,
+                            # and handle final output below.
+                            break
+                        else:
+                            # Another finish reason that may require no forwarding.
+                            should_forward = False
 
-                # save the last message
-                last = parsed_data
+                    # Handle tool calls if present
+                    if parsed_data.choices[0].delta.tool_calls is not None:
+                        should_forward = False
+                        tcall = parsed_data.choices[0].delta.tool_calls[0]
+                        assert tcall.function is not None
+                        tool_call_name = tcall.function.name or tool_call_name
+                        tool_call_id = tcall.id if tcall.id is not None else tool_call_id
+                        tool_args = tcall.function.arguments
+                        tool_call_json += tool_args if tool_args is not None else ""
 
-        # ideally we should check this properly
-        assert last is not None
-        assert last.choices[0].finish_reason is not None
+                    # Forward SSE messages to the client if allowed
+                    if should_forward and sse.data:
+                        logger.debug("Forwarding message to client")
+                        try:
+                            yield SSEData.model_validate_json(sse.data).model_dump_json()
+                        except (asyncio.CancelledError, WebSocketDisconnect, ConnectionError):
+                            logger.warning("Client disconnected during SSE forwarding.")
+                            return
 
-        if last.choices[0].finish_reason.value in ["stop", "length"]:
-            logger.debug("no tool calls found")
-            fully_done = True
+                    # Save the last message
+                    last = parsed_data
 
-        logger.debug("tool calls found")
-        logger.error(
-            f"{tool_call_name=} {tool_call_json=}"
-        )  # this should not be error but its easier to debug
+            # If we got here, we exited the aiter_sse loop either because of [DONE] or a finish reason
+            if last is None:
+                # No data was ever received, break out (nothing more to do)
+                logger.debug("No data received, assuming done.")
+                fully_done = True
+                break
 
-        # add recieved message to the history
-        msg = ChatCompletionRequestMessage(
-            role="assistant",
-            content=response_content,
-            tool_calls=[
-                ChatCompletionMessageToolCall(
-                    id=tool_call_id,
-                    type="function",
-                    function=Function1(
-                        name=tool_call_name, arguments=tool_call_json
-                    ),
-                )
-            ],
-        )  # type: ignore
-        request.messages.append(msg)
+            # Check finish reason again after exiting the SSE loop
+            if last.choices[0].finish_reason is not None:
+                if last.choices[0].finish_reason.value in ["stop", "length"]:
+                    logger.debug("No more messages to receive. Finishing.")
+                    fully_done = True
+                else:
+                    # Non-standard finish reason
+                    logger.debug("Non-standard finish reason, stopping.")
+                    fully_done = True
 
-        #### MOST OF THIS IS COPY PASTED FROM CHAT_COMPLETIONS
-        # FIXME: this can probably be done in parallel using asyncio gather
-        session = await ClientManager.get_client_from_tool(tool_call_name)
-        tool_call_result = await session.call_tool(
-            name=tool_call_name,
-            arguments=json.loads(tool_call_json),
-        )
+            # If no tool calls found, we're done
+            if tool_call_name == "":
+                logger.debug("No tool calls found in this cycle.")
+                # If we reached here, no more content is coming.
+                # fully_done might already be True.
+                # If not, set it now.
+                fully_done = True
 
-        logger.debug(
-            f"tool call result for {tool_call_name}: {tool_call_result.model_dump()}"
-        )
-
-        logger.debug(f"tool call result content: {tool_call_result.content}")
-
-        # FIXME: this cannot handle multipart messages
-        request.messages.append(
-            ChatCompletionRequestMessage.model_validate(
-                {
-                    "role": "tool",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": tool_call_result.content[0].text,
-                        },
+            # If we have a tool call, let's execute it
+            if tool_call_name:
+                logger.debug(f"Tool calls found: {tool_call_name=} {tool_call_json=}")
+                msg = ChatCompletionRequestMessage(
+                    role="assistant",
+                    content=response_content,
+                    tool_calls=[
+                        ChatCompletionMessageToolCall(
+                            id=tool_call_id,
+                            type="function",
+                            function=Function1(
+                                name=tool_call_name, arguments=tool_call_json
+                            ),
+                        )
                     ],
-                    "tool_call_id": tool_call_id,
-                }  # type: ignore
-            )
-        )
+                )  # type: ignore
+                request.messages.append(msg)
 
-        logger.debug("sending next iteration of chat completion request")
+                # Execute the tool call
+                session = await ClientManager.get_client_from_tool(tool_call_name)
+                tool_call_result = await session.call_tool(
+                    name=tool_call_name,
+                    arguments=json.loads(tool_call_json),
+                )
 
-    # when done, send the final event
-    logger.debug("sending final event")
-    yield ServerSentEvent(event="message", data="[DONE]", id=None, retry=None)
+                logger.debug(
+                    f"Tool call result for {tool_call_name}: {tool_call_result.model_dump()}"
+                )
+                logger.debug(f"Tool call result content: {tool_call_result.content}")
+                tools_content = [{"type": "text", "text": part.text} for part in tool_call_result.content]
+
+                request.messages.append(
+                    ChatCompletionRequestMessage.model_validate(
+                        {
+                            "role": "tool",
+                            "content": tools_content,
+                            "tool_call_id": tool_call_id,
+                        }
+                    )
+                )
+
+
+                logger.debug("Sending next iteration of chat completion request")
+                # This will loop again since fully_done is still False if we expect more output.
+                # If no more output is expected, fully_done should be set True before continuing.
+
+    except (asyncio.CancelledError, ConnectionError) as e:
+        logger.warning(f"Client disconnected or connection error: {e}")
+        return
+    except Exception as e:
+        logger.error(f"Unexpected error in chat_completions: {e}")
+        return
+
+    # When fully done, send the final DONE event and break
+    logger.debug("Streaming complete. Sending final [DONE] event.")
+    try:
+        yield ServerSentEvent(event="message", data="[DONE]", id=None, retry=None)
+    except (asyncio.CancelledError, ConnectionError):
+        logger.warning("Client disconnected before receiving final [DONE].")
+        return
