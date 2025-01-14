@@ -3,11 +3,11 @@ import uuid
 from kubernetes import client, config
 from kubernetes.client import V1EnvVar
 from kubernetes.stream import stream
-from config.final import DockerMCPServer
+from config.final import KubernetesMCPServer
 
 def create_interactive_job(
     namespace: str,
-    server: DockerMCPServer,
+    server: KubernetesMCPServer,
 ) -> str:
     """
     Create a new Job with a random name for interactive usage.
@@ -25,7 +25,7 @@ def create_interactive_job(
     job_body = client.V1Job(
         metadata=client.V1ObjectMeta(name=job_name),
         spec=client.V1JobSpec(
-            parallelism=1,
+            parallelism=server.parallelism,
             completions=1,
             template=client.V1PodTemplateSpec(
                 metadata=client.V1ObjectMeta(labels={"job-name": job_name}),
