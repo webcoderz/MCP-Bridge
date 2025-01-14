@@ -3,12 +3,11 @@ import uuid
 from kubernetes import client, config
 from kubernetes.client import V1EnvVar
 from kubernetes.stream import stream
+from config.final import DockerMCPServer
 
 def create_interactive_job(
     namespace: str,
-    image: str,
-    command: list[str] = None,
-    env: dict[str, str] = None,
+    server: DockerMCPServer,
 ) -> str:
     """
     Create a new Job with a random name for interactive usage.
@@ -17,11 +16,11 @@ def create_interactive_job(
     config.load_incluster_config()
     batch_v1 = client.BatchV1Api()
 
-    job_name = f"tool-job-{str(uuid.uuid4())[:8]}"
+    job_name = f"tool-job-{server.image}-{str(uuid.uuid4())[:8]}"
 
     env_list = []
-    if env:
-        env_list = [V1EnvVar(name=k, value=v) for k, v in env.items()]
+    if server.env:
+        env_list = [V1EnvVar(name=k, value=v) for k, v in server.env.items()]
 
     job_body = client.V1Job(
         metadata=client.V1ObjectMeta(name=job_name),
@@ -34,11 +33,11 @@ def create_interactive_job(
                     restart_policy="Never",
                     containers=[
                         client.V1Container(
-                            name="tool-container",
-                            image=image,
+                            name=job_name,
+                            image=server.image,
                             tty=True,
                             stdin=True,
-                            command=command,  # e.g. ["sh", "-c", "while true; do ..."]
+                            #command=command,  # e.g. ["sh", "-c", "while true; do ..."]
                             env=env_list,
                         )
                     ],
