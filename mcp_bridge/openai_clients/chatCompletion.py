@@ -6,8 +6,8 @@ from lmos_openai_types import (
 
 from .utils import call_tool, chat_completion_add_tools
 from .genericHttpxClient import client
-from mcp_clients.McpClientManager import ClientManager
-from tool_mappers import mcp2openai
+from mcp_bridge.mcp_clients.McpClientManager import ClientManager
+from mcp_bridge.tool_mappers import mcp2openai
 from loguru import logger
 import json
 
@@ -25,15 +25,18 @@ async def chat_completions(
         text = (
             await client.post(
                 "/chat/completions",
-                content=request.model_dump_json(
-                    exclude_defaults=True, exclude_none=True, exclude_unset=True
-                ),
+                #content=request.model_dump_json(
+                #    exclude_defaults=True, exclude_none=True, exclude_unset=True
+                #),
+                json=request.model_dump(exclude_defaults=True, exclude_none=True, exclude_unset=True),
             )
         ).text
         logger.debug(text)
         try:
             response = CreateChatCompletionResponse.model_validate_json(text)
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error parsing response: {text}")
+            logger.error(e)
             return
 
         msg = response.choices[0].message

@@ -1,13 +1,14 @@
 from typing import Union
-from config import config
+from mcp_bridge.config import config
 from mcp import McpError, StdioServerParameters
 from loguru import logger
 
 from .StdioClient import StdioClient
 from .SseClient import SseClient
-from config.final import SSEMCPServer
+from .DockerClient import DockerClient
+from mcp_bridge.config.final import DockerMCPServer, SSEMCPServer
 
-client_types = Union[StdioClient, SseClient]
+client_types = Union[StdioClient, SseClient, DockerClient]
 
 
 class MCPClientManager:
@@ -36,6 +37,11 @@ class MCPClientManager:
             client = SseClient(name, server_config)  # type: ignore
             await client.start()
             return client
+        
+        if isinstance(server_config, DockerMCPServer):
+            client = DockerClient(name, server_config)
+            await client.start()
+            return client
 
         raise NotImplementedError("Client Type not supported")
 
@@ -47,13 +53,26 @@ class MCPClientManager:
 
     async def get_client_from_tool(self, tool: str):
         for name, client in self.get_clients():
-            list_tools = await client.session.list_tools()
-            for client_tool in list_tools.tools:
-                if client_tool.name == tool:
-                    return client
+            
+            # client cannot have tools if it is not connected
+            if not client.session:
+                continue
+
+            try:
+                list_tools = await client.session.list_tools()
+                for client_tool in list_tools.tools:
+                    if client_tool.name == tool:
+                        return client
+            except McpError:
+                continue
 
     async def get_client_from_prompt(self, prompt: str):
         for name, client in self.get_clients():
+
+            # client cannot have prompts if it is not connected
+            if not client.session:
+                continue
+
             try:
                 list_prompts = await client.session.list_prompts()
                 for client_prompt in list_prompts.prompts:

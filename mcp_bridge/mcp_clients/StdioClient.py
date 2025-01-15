@@ -1,12 +1,15 @@
 import asyncio
 from mcp import ClientSession, StdioServerParameters, stdio_client
 
-from config import config
+from mcp_bridge.config import config
 from .AbstractClient import GenericMcpClient
 from loguru import logger
 import shutil
 import os
 
+
+# Keywords to identify virtual environment variables
+venv_keywords = ["CONDA", "VIRTUAL", "PYTHON"]
 
 class StdioClient(GenericMcpClient):
     config: StdioServerParameters
@@ -15,6 +18,13 @@ class StdioClient(GenericMcpClient):
         super().__init__(name=name)
 
         env = dict(os.environ.copy())
+
+        env = {
+            key: value for key, value in env.items()
+            if not any(key.startswith(keyword) for keyword in venv_keywords)
+        }
+
+        # logger.debug(f"env: {env}")
 
         if config.env is not None:
             env.update(config.env)
@@ -33,8 +43,13 @@ class StdioClient(GenericMcpClient):
         self.config = own_config
 
     async def _maintain_session(self):
+        logger.debug(f"starting maintain session for {self.name}")
         async with stdio_client(self.config) as client:
+            logger.debug(f"entered stdio_client context manager for {self.name}")
+            assert client[0] is not None, f"missing read stream for {self.name}"
+            assert client[1] is not None, f"missing write stream for {self.name}"
             async with ClientSession(*client) as session:
+                logger.debug(f"entered client session context manager for {self.name}")
                 await session.initialize()
                 logger.debug(f"finished initialise session for {self.name}")
                 self.session = session

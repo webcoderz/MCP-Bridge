@@ -5,16 +5,18 @@ description = "A middleware to provide an openAI compatible endpoint that can ca
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "aiodocker>=0.24.0",
     "deepmerge>=2.0",
     "fastapi>=0.115.6",
     "httpx>=0.28.1",
     "httpx-sse>=0.4.0",
     "lmos-openai-types",
     "loguru>=0.7.3",
-    "mcp>=1.1.2",
+    "mcp>=1.2.0",
     "pydantic>=2.10.4",
     "pydantic-settings>=2.7.0",
     "sse-starlette>=2.2.0",
+    "tortoise-orm[asyncmy,asyncpg]>=0.23.0",
     "uvicorn>=0.34.0",
 ]
 
@@ -32,3 +34,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 path = "mcp_bridge/__init__.py"
+
+[project.scripts]
+mcp-bridge = "mcp_bridge.main:run"

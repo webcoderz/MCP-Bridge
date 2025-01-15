@@ -15,7 +15,7 @@ from mcp.types import (
 )
 from loguru import logger
 from pydantic import AnyUrl
-from models.mcpServerStatus import McpServerStatus
+from mcp_bridge.models.mcpServerStatus import McpServerStatus
 
 
 class GenericMcpClient(ABC):
@@ -26,7 +26,10 @@ class GenericMcpClient(ABC):
 
     def __init__(self, name: str) -> None:
         super().__init__()
+        self.session = None
         self.name = name
+
+        logger.debug(f"initializing client class for {name}")
 
     @abstractmethod
     async def _maintain_session(self):
@@ -38,7 +41,9 @@ class GenericMcpClient(ABC):
                 await self._maintain_session()
             except Exception as e:
                 logger.trace(f"failed to maintain session for {self.name}: {e}")
-                await asyncio.sleep(0.5)
+
+            logger.debug(f"restarting session for {self.name}")
+            await asyncio.sleep(0.5)
 
     async def start(self):
         asyncio.create_task(self._session_maintainer())
@@ -121,19 +126,20 @@ class GenericMcpClient(ABC):
             logger.error(f"error listing prompts: {e}")
             return ListPromptsResult(prompts=[])
 
-    async def _wait_for_session(self, timeout: int = 10, http_error: bool = True):
+    async def _wait_for_session(self, timeout: int = 5, http_error: bool = True):
         try:
             async with asyncio.timeout(timeout):
                 while self.session is None:
                     await asyncio.sleep(1)
+                    logger.debug(f"waiting for session for {self.name}")
 
         except asyncio.TimeoutError:
             if http_error:
                 raise HTTPException(
-                    status_code=500, detail="Could not connect to MCP server."
+                    status_code=500, detail=f"Could not connect to MCP server \"{self.name}\"." 
                 )
 
-            raise TimeoutError("Session initialization timed out.")
+            raise TimeoutError(f"Could not connect to MCP server \"{self.name}\"." )
 
         assert self.session is not None, "Session is None"
 

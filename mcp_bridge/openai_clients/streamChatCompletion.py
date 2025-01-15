@@ -1,5 +1,4 @@
 import json
-from socket import timeout
 from typing import Optional
 from fastapi import HTTPException
 from lmos_openai_types import (
@@ -10,10 +9,10 @@ from lmos_openai_types import (
     Function1,
 )
 from .utils import call_tool, chat_completion_add_tools
-from models import SSEData
+from mcp_bridge.models import SSEData
 from .genericHttpxClient import client
-from mcp_clients.McpClientManager import ClientManager
-from tool_mappers import mcp2openai
+from mcp_bridge.mcp_clients.McpClientManager import ClientManager
+from mcp_bridge.tool_mappers import mcp2openai
 from loguru import logger
 from httpx_sse import aconnect_sse
 
@@ -43,9 +42,13 @@ async def chat_completions(request: CreateChatCompletionRequest):
 
     fully_done = False
     while not fully_done:
-        json_data = request.model_dump_json(
+        # json_data = request.model_dump_json(
+        #     exclude_defaults=True, exclude_none=True, exclude_unset=True
+        # )
+
+        json_data = json.dumps(request.model_dump(
             exclude_defaults=True, exclude_none=True, exclude_unset=True
-        )
+        ))
 
         # logger.debug(json_data)
 
@@ -68,9 +71,10 @@ async def chat_completions(request: CreateChatCompletionRequest):
                 if "text/event-stream" not in content_type:
                     logger.error(f"Unexpected Content-Type: {content_type}")
                     error_data = await event_source.response.aread()
-                    logger.debug(f"Request URL: {event_source.response.url}")
-                    logger.debug(f"Response Status: {event_source.response.status_code}")
-                    logger.debug(f"Response Data: {error_data.decode(event_source.response.encoding or 'utf-8')}")
+                    logger.error(f"Request URL: {event_source.response.url}")
+                    logger.error(f"Request Data: {json_data}")
+                    logger.error(f"Response Status: {event_source.response.status_code}")
+                    logger.error(f"Response Data: {error_data.decode(event_source.response.encoding or 'utf-8')}")
                     raise HTTPException(status_code=500, detail="Unexpected Content-Type")
 
             # iterate over the SSE stream
