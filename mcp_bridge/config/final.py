@@ -35,6 +35,7 @@ class KubernetesMCPServer(BaseModel):
     image: str = Field(description="Image of the docker container")
     args: list[str] = Field(default_factory=list, description="Command line arguments for the docker container")
     env: dict[str, str] = Field(default_factory=dict, description="Environment variables for the docker container")
+    broker_mode: bool = Field(False, description="broker mode")
     parallelism: int = Field(1, description="Number of parallel instances of the container")
 
 MCPServer = Annotated[
@@ -61,6 +62,10 @@ class Settings(BaseSettings):
     logging: Logging = Field(
         default_factory=lambda: Logging.model_construct(),
         description="logging config",
+    )
+
+    broker_mode: bool = Field(
+        False, description="broker mode"
     )
 
     network: Network = Field(

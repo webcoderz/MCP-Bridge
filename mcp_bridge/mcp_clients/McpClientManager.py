@@ -6,7 +6,7 @@ from loguru import logger
 from .StdioClient import StdioClient
 from .SseClient import SseClient
 from .DockerClient import DockerClient
-from mcp_bridge.config.final import DockerMCPServer, SSEMCPServer
+from mcp_bridge.config.final import DockerMCPServer, SSEMCPServer,KubernetesMCPServer
 
 client_types = Union[StdioClient, SseClient, DockerClient]
 
@@ -39,6 +39,11 @@ class MCPClientManager:
             return client
         
         if isinstance(server_config, DockerMCPServer):
+            client = DockerClient(name, server_config)
+            await client.start()
+            return client
+
+        if isinstance(server_config, KubernetesMCPServer):
             client = DockerClient(name, server_config)
             await client.start()
             return client
