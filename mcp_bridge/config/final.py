@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import BaseModel, Field
 
 from mcp.client.stdio import StdioServerParameters
+from mcpx.client.transports.docker import DockerMCPServer
 
 
 class InferenceServer(BaseModel):
@@ -20,15 +21,21 @@ class Logging(BaseModel):
     log_server_pings: bool = Field(False, description="log server pings")
 
 
+class SamplingModel(BaseModel):
+    model: Annotated[str, Field(description="Name of the sampling model")]
+
+    intelligence: Annotated[float, Field(description="Intelligence of the sampling model")] = 0.5
+    cost: Annotated[float, Field(description="Cost of the sampling model")] = 0.5
+    speed: Annotated[float, Field(description="Speed of the sampling model")] = 0.5
+
+
+class Sampling(BaseModel):
+    timeout: Annotated[int, Field(description="Timeout for sampling requests")] = 10
+    models: Annotated[list[SamplingModel], Field(description="List of sampling models")] = []
+
 class SSEMCPServer(BaseModel):
     # TODO: expand this once I find a good definition for this
     url: str = Field(description="URL of the MCP server")
-
-class DockerMCPServer(BaseModel):
-    container_name: str | None = Field(default=None, description="Name of the docker container")
-    image: str = Field(description="Image of the docker container")
-    args: list[str] = Field(default_factory=list, description="Command line arguments for the docker container")
-    env: dict[str, str] = Field(default_factory=dict, description="Environment variables for the docker container")
 
 
 MCPServer = Annotated[
@@ -50,6 +57,11 @@ class Settings(BaseSettings):
 
     mcp_servers: dict[str, MCPServer] = Field(
         default_factory=dict, description="MCP servers configuration"
+    )
+
+    sampling: Sampling = Field(
+        default_factory=lambda: Sampling.model_construct(),
+        description="sampling config",
     )
 
     logging: Logging = Field(

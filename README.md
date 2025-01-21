@@ -2,6 +2,7 @@
 
 <p>
   <a href="https://discord.gg/4NVQHqNxSZ"><img alt="Discord" src="https://img.shields.io/discord/1320517159331430480?style=flat&logo=discord&color=blue"></a>
+  <a href="/docs/README.md"><img alt="Static Badge" src="https://img.shields.io/badge/docs-md-blue"></a>
   <a href="LICENSE"><img alt="Static Badge" src="https://img.shields.io/badge/License-MIT-blue?style=flat"></a>
 </p>
 
@@ -23,6 +24,7 @@ working features:
 - non streaming completions without MCP
 
 - MCP tools
+- MCP sampling
 
 - SSE Bridge for external clients
 
@@ -129,6 +131,23 @@ an example config.json file with most of the options explicitly set:
         "base_url": "http://localhost:8000/v1",
         "api_key": "None"
     },
+    "sampling": {
+        "timeout": 10,
+        "models": [
+            {
+                "model": "gpt-4o",
+                "intelligence": 0.8,
+                "cost": 0.9,
+                "speed": 0.3
+            },
+            {
+                "model": "gpt-4o-mini",
+                "intelligence": 0.4,
+                "cost": 0.1,
+                "speed": 0.7
+            }
+        ]
+    },
     "mcp_servers": {
         "fetch": {
             "command": "uvx",
@@ -157,6 +176,8 @@ an example config.json file with most of the options explicitly set:
 ## Support
 
 If you encounter any issues please open an issue or join the [discord](https://discord.gg/4NVQHqNxSZ).
+
+There is also documentation available [here](/docs/README.md).
 
 ## How does it work
 
