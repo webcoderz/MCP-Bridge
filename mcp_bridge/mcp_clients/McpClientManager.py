@@ -1,12 +1,15 @@
 from typing import Union
-from mcp_bridge.config import config
-from mcp import McpError, StdioServerParameters
-from loguru import logger
 
-from .StdioClient import StdioClient
-from .SseClient import SseClient
+from loguru import logger
+from mcp import McpError, StdioServerParameters
+from mcpx.client.transports.docker import DockerMCPServer
+
+from mcp_bridge.config import config
+from mcp_bridge.config.final import SSEMCPServer
+
 from .DockerClient import DockerClient
-from mcp_bridge.config.final import DockerMCPServer, SSEMCPServer,KubernetesMCPServer
+from .SseClient import SseClient
+from .StdioClient import StdioClient
 
 client_types = Union[StdioClient, SseClient, DockerClient]
 
@@ -39,11 +42,6 @@ class MCPClientManager:
             return client
         
         if isinstance(server_config, DockerMCPServer):
-            client = DockerClient(name, server_config)
-            await client.start()
-            return client
-
-        if isinstance(server_config, KubernetesMCPServer):
             client = DockerClient(name, server_config)
             await client.start()
             return client
