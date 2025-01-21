@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field
 
 from mcp.client.stdio import StdioServerParameters
 from mcpx.client.transports.docker import DockerMCPServer
+from mcpx.client.transports.kubernetes import KubernetesMCPServer
+
 
 
 class InferenceServer(BaseModel):
@@ -39,7 +41,7 @@ class SSEMCPServer(BaseModel):
 
 
 MCPServer = Annotated[
-    Union[StdioServerParameters, SSEMCPServer, DockerMCPServer],
+    Union[StdioServerParameters, SSEMCPServer, DockerMCPServer, KubernetesMCPServer],
     Field(description="MCP server configuration"),
 ]
 
